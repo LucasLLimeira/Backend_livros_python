@@ -11,7 +11,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-app = FastAPI()
+app = FastAPI(
+    title="API de Livros",
+    description="API para gerenciar uma coleção de livros",
+    version="1.0.0",
+    contact={
+        "name": "Lucas Limeira",
+        "email": "lucasdllimeira@gmail.com"
+    }
+)
 
 meus_livros = {}
 
