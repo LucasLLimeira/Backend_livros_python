@@ -43,10 +43,23 @@ def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 @app.get("/livros")
-def ler_livros(credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+def ler_livros(page: int = 1, limit: int = 10, credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+    if page < 1 or limit < 1:
+        raise HTTPException(status_code=400, detail="Page e limit devem ser maiores que 0")
     if not meus_livros:
         raise HTTPException(status_code=404, detail="Nenhum livro encontrado")
-    return meus_livros
+    start = (page - 1) * limit
+    end = start + limit
+    livros_paginados = [
+        {"id": id, "titulo": livro_data["titulo"], "autor": livro_data["autor"], "lancamento": livro_data["lancamento"]}
+        for id, livro_data in list(meus_livros.items())[start:end]
+    ]
+    return {
+        "page": page,
+        "limit": limit,
+        "total_livros": len(meus_livros),
+        "livros": livros_paginados
+    }
 
 @app.post("/adicionar_livros")
 def criar_livro(id: int, livro: Livro, credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
