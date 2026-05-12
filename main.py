@@ -48,11 +48,14 @@ def ler_livros(page: int = 1, limit: int = 10, credenciais: HTTPBasicCredentials
         raise HTTPException(status_code=400, detail="Page e limit devem ser maiores que 0")
     if not meus_livros:
         raise HTTPException(status_code=404, detail="Nenhum livro encontrado")
+    
+    livros_ordenados = sorted(meus_livros.items(), key=lambda x: x[0])
+
     start = (page - 1) * limit
     end = start + limit
     livros_paginados = [
         {"id": id, "titulo": livro_data["titulo"], "autor": livro_data["autor"], "lancamento": livro_data["lancamento"]}
-        for id, livro_data in list(meus_livros.items())[start:end]
+        for id, livro_data in livros_ordenados[start:end]
     ]
     return {
         "page": page,
