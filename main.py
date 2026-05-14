@@ -38,8 +38,6 @@ MINHA_SENHA = "123456"
 
 security = HTTPBasic()
 
-meus_livros = {}
-
 class LivroDB(Base):
     __tablename__ = "livros"
 
