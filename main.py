@@ -12,12 +12,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from typing import Optional
 import secrets
+import os
 
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
-DATABASE_URL = "sqlite:///./livros.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -33,8 +34,8 @@ app = FastAPI(
     }
 )
 
-MEU_USUARIO = "lucas"
-MINHA_SENHA = "123456"
+MEU_USUARIO = os.getenv("MEU_USUARIO")
+MINHA_SENHA = os.getenv("MINHA_SENHA")
 
 security = HTTPBasic()
 
@@ -66,6 +67,10 @@ def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Usuário ou senha incorretos", headers={"WWW-Authenticate": "Basic"})
     return credentials.username
+
+@app.get("/")
+def ler_raiz():
+    return {"message": "Bem-vindo à API de Livros!"}
 
 @app.get("/livros")
 def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):

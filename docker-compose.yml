@@ -6,8 +6,8 @@ services:
     container_name: livros_api
     ports:
       - "8000:8000"
-      volumes:
+    volumes:
       - .:/app
-    environment:
-      - PYTHONBUFFERED=1
+    env_file:
+      - .env
     command: ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
