@@ -1,12 +1,13 @@
 # Backend Livros Python
 
-API REST para gerenciamento de livros com FastAPI, SQLAlchemy e SQLite.
+API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 
 ## Stack
 - Python 3.14+
 - FastAPI
 - SQLAlchemy
 - SQLite
+- Redis
 - Poetry
 - Podman + podman-compose
 
@@ -21,6 +22,10 @@ Crie um arquivo .env na raiz do projeto com:
 DATABASE_URL=sqlite:///./livros.db
 MEU_USUARIO=admin
 MINHA_SENHA=senha_forte
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
 
 ## Executar localmente com Poetry
 1. Instale dependências:
@@ -44,6 +49,7 @@ MINHA_SENHA=senha_forte
 
 ## Endpoints principais
 - GET /
+- GET /debug/redis
 - GET /livros?page=1&limit=10
 - POST /adicionar_livros
 - PUT /atualizar_livros/{id}
@@ -68,4 +74,5 @@ POST /adicionar_livros
 
 ## Observações
 - O banco SQLite é criado automaticamente no arquivo livros.db.
+- O cache Redis e fail-soft: se o Redis estiver indisponível, o dado continua sendo salvo no banco e a API retorna um aviso de cache.
 - Em produção, use um banco gerenciado e segredos fora do arquivo .env.
