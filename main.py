@@ -30,6 +30,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 redis_client = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", 6379)), db=0, decode_responses=True)
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 30))
 
 app = FastAPI(
     title="API de Livros",
@@ -63,8 +64,9 @@ Base.metadata.create_all(bind=engine)
 
 def salvar_livro_cache(livro: LivroDB):
     try:
-        redis_client.set(
+        redis_client.setex(
             f"livro:{livro.id}",
+            CACHE_TTL_SECONDS,
             json.dumps(
                 {
                     "id": livro.id,
@@ -106,20 +108,43 @@ async def ler_raiz():
 @app.get("/debug/redis")
 async def debug_redis():
     try:
-        keys = redis_client.keys("livro:*")
-        livros = []
-        for key in keys:
-            livro = redis_client.get(key)
-            if livro:
-                livros.append(json.loads(livro))
-        return {"redis_status": "ok", "livros": livros}
+        itens_cache = []
+        for pattern in ("livro:*", "livros:*"):
+            keys = redis_client.keys(pattern)
+            for key in keys:
+                valor = redis_client.get(key)
+                if not valor:
+                    continue
+
+                ttl = redis_client.ttl(key)
+                itens_cache.append(
+                    {
+                        "chave": key,
+                        "ttl_segundos_restantes": ttl if ttl >= 0 else None,
+                        "valor": json.loads(valor),
+                    }
+                )
+
+        return {
+            "redis_status": "ok",
+            "ttl_padrao_segundos": CACHE_TTL_SECONDS,
+            "itens_cache": itens_cache,
+        }
     except RedisError:
-        return {"redis_status": "indisponivel", "livros": []}
+        return {"redis_status": "indisponivel", "itens_cache": []}
 
 @app.get("/livros")
 async def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
     if page < 1 or limit < 1:
-        raise HTTPException(status_code=400, detail="Page e limit devem ser maiores que 0")
+        raise HTTPException(status_code=400, detail="Page ou limit estão com valores inválidos.")
+
+    cache_livros = f"livros:page={page}&limit={limit}"
+    try:
+        cached = redis_client.get(cache_livros)
+        if cached:
+            return json.loads(cached)
+    except RedisError:
+        pass
     
     livros = db.query(LivroDB).offset((page - 1) * limit).limit(limit).all()
 
@@ -128,12 +153,19 @@ async def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_d
     
     total_livros = db.query(LivroDB).count()
 
-    return {
+    resposta = {
         "page": page,
         "limit": limit,
         "total_livros": total_livros,
         "livros": [{"id": livro.id, "titulo": livro.titulo, "autor": livro.autor, "lancamento": livro.lancamento} for livro in livros]
     }
+
+    try:
+        redis_client.setex(cache_livros, CACHE_TTL_SECONDS, json.dumps(resposta))
+    except RedisError:
+        pass
+
+    return resposta
 
 @app.post("/adicionar_livros")
 async def criar_livro(livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
