@@ -18,6 +18,8 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
+import asyncio
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -69,11 +71,11 @@ def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 @app.get("/")
-def ler_raiz():
+async def ler_raiz():
     return {"message": "Bem-vindo à API de Livros!"}
 
 @app.get("/livros")
-def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+async def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
     if page < 1 or limit < 1:
         raise HTTPException(status_code=400, detail="Page e limit devem ser maiores que 0")
     
@@ -92,7 +94,7 @@ def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_db), cr
     }
 
 @app.post("/adicionar_livros")
-def criar_livro(livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+async def criar_livro(livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
     if db.query(LivroDB).filter(LivroDB.titulo == livro.titulo, LivroDB.autor == livro.autor).first():
         raise HTTPException(status_code=400, detail="Livro já existe")
     else:
@@ -103,7 +105,7 @@ def criar_livro(livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBa
     return {"detail": "Livro adicionado com sucesso", "livro": {"id": novo_livro.id, "titulo": novo_livro.titulo, "autor": novo_livro.autor, "lancamento": novo_livro.lancamento}}
 
 @app.put("/atualizar_livros/{id}")
-def atualizar_livro(id: int, livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+async def atualizar_livro(id: int, livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
     livro_db = db.query(LivroDB).filter(LivroDB.id == id).first()
     if not livro_db:
         raise HTTPException(status_code=404, detail="Livro não encontrado")
@@ -115,7 +117,7 @@ def atualizar_livro(id: int, livro: Livro, db: Session = Depends(get_db), creden
     return {"detail": "Livro atualizado com sucesso", "livro": {"id": livro_db.id, "titulo": livro_db.titulo, "autor": livro_db.autor, "lancamento": livro_db.lancamento}}
 
 @app.delete("/deletar_livros/{id}")
-def deletar_livro(id: int, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+async def deletar_livro(id: int, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
     livro_db = db.query(LivroDB).filter(LivroDB.id == id).first()
     if not livro_db:
         raise HTTPException(status_code=404, detail="Livro não encontrado")
