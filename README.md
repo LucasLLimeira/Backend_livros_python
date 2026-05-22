@@ -13,7 +13,8 @@ API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 
 ## Funcionalidades
 - CRUD de livros
-- Paginação na listagem
+- Paginação na listagem com cache Redis
+- Debug de cache e TTL no endpoint /debug/redis
 - Autenticação HTTP Basic
 
 ## Variáveis de ambiente
@@ -24,6 +25,7 @@ MEU_USUARIO=admin
 MINHA_SENHA=senha_forte
 REDIS_HOST=redis
 REDIS_PORT=6379
+CACHE_TTL_SECONDS=30
 
 Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
 
@@ -40,11 +42,13 @@ Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
 ## Executar com Podman Compose
 1. Build da imagem:
    podman-compose build
-2. Subir container:
+2. Subir containers:
    podman-compose up -d
-3. Logs:
+3. Validar configuração:
+   podman-compose config
+4. Logs:
    podman-compose logs -f
-4. Derrubar ambiente:
+5. Derrubar ambiente:
    podman-compose down
 
 ## Endpoints principais
@@ -74,5 +78,7 @@ POST /adicionar_livros
 
 ## Observações
 - O banco SQLite é criado automaticamente no arquivo livros.db.
-- O cache Redis e fail-soft: se o Redis estiver indisponível, o dado continua sendo salvo no banco e a API retorna um aviso de cache.
+- O cache Redis é configurado por CACHE_TTL_SECONDS e expira automaticamente as chaves de cache.
+- O endpoint /debug/redis retorna redis_status, ttl_padrao_segundos e os itens com ttl_segundos_restantes.
+- Estratégia fail-soft: se o Redis estiver indisponível, o dado continua sendo salvo no banco e a API retorna aviso de cache quando aplicável.
 - Em produção, use um banco gerenciado e segredos fora do arquivo .env.
