@@ -219,6 +219,18 @@ async def listar_tarefas(page: int = 1):
         "tarefas": tarefas,
     }
 
+@app.get("/calcular/tarefas/{task_id}")
+async def obter_tarefa(task_id: str):
+    tarefa = formatar_status_tarefa(task_id)
+    return {
+        "task_id": tarefa["task_id"],
+        "tipo": tarefa.get("tipo"),
+        "entrada": tarefa.get("entrada"),
+        "status": tarefa["status"],
+        "result": tarefa.get("resultado"),
+        "criada_em": tarefa.get("criada_em"),
+    }
+
 @app.get("/debug/redis")
 async def debug_redis():
     try:

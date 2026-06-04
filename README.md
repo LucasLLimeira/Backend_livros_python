@@ -79,6 +79,7 @@ podman-compose down
 - GET /
 - GET /debug/redis
 - GET /calcular/tarefas?page=1
+- GET /calcular/tarefas/{task_id}
 - POST /calcular/soma?a=5&b=2
 - POST /calcular/fatorial?n=5
 - GET /livros?page=1&limit=10
@@ -95,6 +96,8 @@ Todos os endpoints de livros exigem autenticação Basic Auth.
    `GET /calcular/tarefas?page=1`
 4. Para navegar entre as páginas, aumente o valor de `page`.
 5. Cada página sempre traz até 10 itens.
+6. Para ver uma tarefa específica, use:
+   `GET /calcular/tarefas/{task_id}`
 
 ## Exemplo de payload
 POST /adicionar_livros
