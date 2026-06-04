@@ -15,6 +15,7 @@ API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 - CRUD de livros
 - Paginação na listagem com cache Redis
 - Debug de cache e TTL no endpoint /debug/redis
+- Execução assíncrona de soma e fatorial com lista de tarefas recentes em /calcular/tarefas
 - Autenticação HTTP Basic
 
 ## Variáveis de ambiente
@@ -28,6 +29,29 @@ REDIS_PORT=6379
 CACHE_TTL_SECONDS=30
 
 Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
+
+## Passo a passo para iniciar o projeto
+Use este fluxo toda vez que for subir o ambiente:
+
+1. Abra o terminal na raiz do projeto.
+2. Se houver containers antigos do projeto rodando, limpe antes de subir:
+   podman rm -f livros_api livros_celery livros_redis
+3. Valide a configuração do Compose:
+   podman-compose config
+4. Suba os containers:
+   podman-compose up -d
+5. Verifique se os containers ficaram ativos:
+   podman ps
+6. Confira a API no navegador ou via terminal:
+   http://localhost:8000
+
+Se quiser acompanhar os logs:
+
+podman-compose logs -f
+
+Para derrubar o ambiente:
+
+podman-compose down
 
 ## Executar localmente com Poetry
 1. Instale dependências:
@@ -54,12 +78,23 @@ Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
 ## Endpoints principais
 - GET /
 - GET /debug/redis
+- GET /calcular/tarefas?page=1
+- POST /calcular/soma?a=5&b=2
+- POST /calcular/fatorial?n=5
 - GET /livros?page=1&limit=10
 - POST /adicionar_livros
 - PUT /atualizar_livros/{id}
 - DELETE /deletar_livros/{id}
 
 Todos os endpoints de livros exigem autenticação Basic Auth.
+
+## Como consultar as tarefas
+1. Envie a requisição de soma ou fatorial.
+2. A resposta já retorna `task_id`, `tipo`, `entrada` e `status`.
+3. Para ver as tarefas registradas, consulte:
+   `GET /calcular/tarefas?page=1`
+4. Para navegar entre as páginas, aumente o valor de `page`.
+5. Cada página sempre traz até 10 itens.
 
 ## Exemplo de payload
 POST /adicionar_livros

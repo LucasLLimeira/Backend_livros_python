@@ -13,9 +13,15 @@ from pydantic import BaseModel
 from typing import Optional
 import secrets
 import os
+import math
+from datetime import datetime
 import redis
 import json
 from redis.exceptions import RedisError
+from fastapi import BackgroundTasks
+from tasks import somar, fatorial
+from celery_app import celery_app
+from celery.result import AsyncResult
 
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
@@ -31,6 +37,10 @@ Base = declarative_base()
 
 redis_client = redis.Redis(host=os.getenv("REDIS_HOST"), port=int(os.getenv("REDIS_PORT", 6379)), db=0, decode_responses=True)
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 30))
+TASK_HISTORY_KEY = "calcular:tarefas"
+TASK_HISTORY_LIMIT = 20
+TASK_RECORD_TTL_SECONDS = 24 * 60 * 60
+TASK_PAGE_SIZE = 10
 
 app = FastAPI(
     title="API de Livros",
@@ -87,6 +97,64 @@ def deletar_livro_cache(id: int):
     except RedisError:
         return False
 
+def registrar_tarefa(task_id: str, tipo: str, entrada: dict):
+    tarefa = {
+        "task_id": task_id,
+        "tipo": tipo,
+        "entrada": entrada,
+        "status": "Pendente",
+        "resultado": None,
+        "criada_em": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+    try:
+        redis_client.setex(
+            f"calcular:task:{task_id}",
+            TASK_RECORD_TTL_SECONDS,
+            json.dumps(tarefa),
+        )
+        redis_client.lpush(TASK_HISTORY_KEY, task_id)
+        redis_client.ltrim(TASK_HISTORY_KEY, 0, TASK_HISTORY_LIMIT - 1)
+    except RedisError:
+        pass
+
+    return tarefa
+
+
+def formatar_status_tarefa(task_id: str):
+    tarefa_salva = None
+    try:
+        tarefa_bruta = redis_client.get(f"calcular:task:{task_id}")
+        if tarefa_bruta:
+            tarefa_salva = json.loads(tarefa_bruta)
+    except RedisError:
+        pass
+
+    task_result = AsyncResult(task_id, app=celery_app)
+    status_map = {
+        "PENDING": "Pendente",
+        "STARTED": "Em execução",
+        "SUCCESS": "Concluída",
+        "FAILURE": "Falhou",
+    }
+    status = status_map.get(task_result.state, task_result.state)
+
+    resposta = tarefa_salva or {"task_id": task_id}
+    resposta.update(
+        {
+            "status": status,
+            "resultado": task_result.result if task_result.state == "SUCCESS" else (str(task_result.result) if task_result.state == "FAILURE" else None),
+        }
+    )
+    return resposta
+
+
+def total_tarefas_registradas() -> int:
+    try:
+        return redis_client.llen(TASK_HISTORY_KEY)
+    except RedisError:
+        return 0
+
 def get_db():
     db = SessionLocal()
     try:
@@ -104,6 +172,52 @@ def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
 @app.get("/")
 async def ler_raiz():
     return {"message": "Bem-vindo à API de Livros!"}
+
+@app.post("/calcular/soma")
+async def calcular_soma(a: int, b: int, background_tasks: BackgroundTasks):
+    task = somar.delay(a, b)
+    registrar_tarefa(task.id, "soma", {"a": a, "b": b})
+    return {
+        "task_id": task.id,
+        "tipo": "soma",
+        "entrada": {"a": a, "b": b},
+        "status": "Pendente",
+        "message": "Tarefa de soma iniciada. Use a lista de tarefas para acompanhar o andamento.",
+    }
+
+@app.post("/calcular/fatorial")
+async def calcular_fatorial(n: int, background_tasks: BackgroundTasks):
+    task = fatorial.delay(n)
+    registrar_tarefa(task.id, "fatorial", {"n": n})
+    return {
+        "task_id": task.id,
+        "tipo": "fatorial",
+        "entrada": {"n": n},
+        "status": "Pendente",
+        "message": "Tarefa de fatorial iniciada. Use a lista de tarefas para acompanhar o andamento.",
+    }
+
+@app.get("/calcular/tarefas")
+async def listar_tarefas(page: int = 1):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="Page deve ser maior que zero.")
+
+    try:
+        total_tarefas = total_tarefas_registradas()
+        offset = (page - 1) * TASK_PAGE_SIZE
+        task_ids = redis_client.lrange(TASK_HISTORY_KEY, offset, offset + TASK_PAGE_SIZE - 1)
+    except RedisError:
+        total_tarefas = 0
+        task_ids = []
+
+    tarefas = [formatar_status_tarefa(task_id) for task_id in task_ids]
+    return {
+        "page": page,
+        "limit": TASK_PAGE_SIZE,
+        "total_tarefas": total_tarefas,
+        "total_paginas": math.ceil(total_tarefas / TASK_PAGE_SIZE) if total_tarefas else 0,
+        "tarefas": tarefas,
+    }
 
 @app.get("/debug/redis")
 async def debug_redis():
