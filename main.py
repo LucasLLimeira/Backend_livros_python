@@ -35,6 +35,9 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+
 redis_client = redis.Redis(host=os.getenv("REDIS_HOST"), port=int(os.getenv("REDIS_PORT", 6379)), db=0, decode_responses=True)
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 30))
 TASK_HISTORY_KEY = "calcular:tarefas"
@@ -176,6 +179,8 @@ async def ler_raiz():
 @app.post("/calcular/soma")
 async def calcular_soma(a: int, b: int, background_tasks: BackgroundTasks):
     task = somar.delay(a, b)
+    redis_client.lpush(TASK_HISTORY_KEY, task.id)
+    redis_client.ltrim(TASK_HISTORY_KEY, 0, TASK_HISTORY_LIMIT - 1)
     registrar_tarefa(task.id, "soma", {"a": a, "b": b})
     return {
         "task_id": task.id,
@@ -188,6 +193,8 @@ async def calcular_soma(a: int, b: int, background_tasks: BackgroundTasks):
 @app.post("/calcular/fatorial")
 async def calcular_fatorial(n: int, background_tasks: BackgroundTasks):
     task = fatorial.delay(n)
+    redis_client.lpush(TASK_HISTORY_KEY, task.id)
+    redis_client.ltrim(TASK_HISTORY_KEY, 0, TASK_HISTORY_LIMIT - 1)
     registrar_tarefa(task.id, "fatorial", {"n": n})
     return {
         "task_id": task.id,
