@@ -8,6 +8,7 @@ API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 - SQLAlchemy
 - SQLite
 - Redis
+- Celery
 - Poetry
 - Podman + podman-compose
 
@@ -16,6 +17,7 @@ API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 - Paginação na listagem com cache Redis
 - Debug de cache e TTL no endpoint /debug/redis
 - Execução assíncrona de soma e fatorial com lista de tarefas recentes em /calcular/tarefas
+- Registro único de tarefa por requisição de soma/fatorial (sem duplicidade no histórico)
 - Autenticação HTTP Basic
 
 ## Variáveis de ambiente
@@ -56,11 +58,13 @@ podman-compose down
 ## Executar localmente com Poetry
 1. Instale dependências:
    poetry install
-2. Suba a API:
+2. Em um terminal, suba a API:
    poetry run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-3. Acesse:
+3. Em outro terminal, suba o worker do Celery:
+   poetry run celery -A celery_app:celery_app worker -Q livros --loglevel=info
+4. Acesse:
    http://localhost:8000
-4. Documentação:
+5. Documentação:
    http://localhost:8000/docs
 
 ## Executar com Podman Compose
@@ -110,9 +114,11 @@ POST /adicionar_livros
 
 ## Estrutura atual
 - main.py: aplicação FastAPI e rotas
+- tasks.py: tarefas assíncronas do Celery (soma e fatorial)
+- celery_app.py: configuração da aplicação Celery
 - pyproject.toml: dependências e metadados do projeto
 - Dockerfile: imagem da aplicação
-- docker-compose.yml: serviço app para execução com Podman
+- docker-compose.yml: serviços app, celery e redis para execução com Podman
 
 ## Observações
 - O banco SQLite é criado automaticamente no arquivo livros.db.
