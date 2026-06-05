@@ -179,8 +179,6 @@ async def ler_raiz():
 @app.post("/calcular/soma")
 async def calcular_soma(a: int, b: int, background_tasks: BackgroundTasks):
     task = somar.delay(a, b)
-    redis_client.lpush(TASK_HISTORY_KEY, task.id)
-    redis_client.ltrim(TASK_HISTORY_KEY, 0, TASK_HISTORY_LIMIT - 1)
     registrar_tarefa(task.id, "soma", {"a": a, "b": b})
     return {
         "task_id": task.id,
@@ -193,8 +191,6 @@ async def calcular_soma(a: int, b: int, background_tasks: BackgroundTasks):
 @app.post("/calcular/fatorial")
 async def calcular_fatorial(n: int, background_tasks: BackgroundTasks):
     task = fatorial.delay(n)
-    redis_client.lpush(TASK_HISTORY_KEY, task.id)
-    redis_client.ltrim(TASK_HISTORY_KEY, 0, TASK_HISTORY_LIMIT - 1)
     registrar_tarefa(task.id, "fatorial", {"n": n})
     return {
         "task_id": task.id,
