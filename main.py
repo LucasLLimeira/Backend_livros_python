@@ -22,6 +22,7 @@ from fastapi import BackgroundTasks
 from tasks import somar, fatorial
 from celery_app import celery_app
 from celery.result import AsyncResult
+from kafka_producer import enviar_evento
 
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
@@ -306,6 +307,11 @@ async def criar_livro(livro: Livro, db: Session = Depends(get_db), credenciais: 
         db.commit()
         db.refresh(novo_livro)
         cache_salvo = salvar_livro_cache(novo_livro)
+
+        enviar_evento("livros_eventos", {
+            "acao": "criar",
+            "livro": livro.model_dump(),
+        })
 
     response = {
         "detail": "Livro adicionado com sucesso",
