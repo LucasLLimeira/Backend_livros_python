@@ -1,6 +1,6 @@
 # Backend Livros Python
 
-API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
+API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite, Redis e publicação de eventos em Kafka.
 
 ## Stack
 - Python 3.14+
@@ -9,6 +9,9 @@ API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 - SQLite
 - Redis
 - Celery
+- Apache Kafka
+- Zookeeper
+- Kafka UI
 - Poetry
 - Podman + podman-compose
 
@@ -19,6 +22,7 @@ API REST para gerenciamento de livros com FastAPI, SQLAlchemy, SQLite e Redis.
 - Execução assíncrona de soma e fatorial com lista de tarefas recentes em /calcular/tarefas
 - Registro único de tarefa por requisição de soma/fatorial (sem duplicidade no histórico)
 - Autenticação HTTP Basic
+- Publicação de eventos Kafka no tópico `livros_eventos` ao criar livros
 
 ## Variáveis de ambiente
 Crie um arquivo .env na raiz do projeto com:
@@ -29,6 +33,7 @@ MINHA_SENHA=senha_forte
 REDIS_HOST=redis
 REDIS_PORT=6379
 CACHE_TTL_SECONDS=30
+KAFKA_SERVER=kafka:9092
 
 Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
 
@@ -37,7 +42,7 @@ Use este fluxo toda vez que for subir o ambiente:
 
 1. Abra o terminal na raiz do projeto.
 2. Se houver containers antigos do projeto rodando, limpe antes de subir:
-   podman rm -f livros_api livros_celery livros_redis
+   podman-compose down
 3. Valide a configuração do Compose:
    podman-compose config
 4. Suba os containers:
@@ -46,6 +51,8 @@ Use este fluxo toda vez que for subir o ambiente:
    podman ps
 6. Confira a API no navegador ou via terminal:
    http://localhost:8000
+7. (Opcional) Acesse a interface do Kafka UI:
+   http://localhost:8080
 
 Se quiser acompanhar os logs:
 
@@ -78,6 +85,19 @@ podman-compose down
    podman-compose logs -f
 5. Derrubar ambiente:
    podman-compose down
+
+## Serviços no Compose
+- `app`: FastAPI (porta 8000)
+- `celery`: worker Celery para fila `livros`
+- `redis`: broker/backend do Celery e cache da API (porta 6379)
+- `zookeeper`: coordenação do Kafka (porta 2181)
+- `kafka`: broker Kafka (porta 9092)
+- `kafka-ui`: painel web para visualizar tópicos e mensagens (porta 8080)
+
+## Kafka no projeto
+- Broker padrão: `kafka:9092` (via variável `KAFKA_SERVER`)
+- Tópico usado pela API: `livros_eventos`
+- Evento publicado atualmente: criação de livro no endpoint `POST /adicionar_livros`
 
 ## Endpoints principais
 - GET /
@@ -116,9 +136,10 @@ POST /adicionar_livros
 - main.py: aplicação FastAPI e rotas
 - tasks.py: tarefas assíncronas do Celery (soma e fatorial)
 - celery_app.py: configuração da aplicação Celery
+- kafka_producer.py: produtor Kafka para envio de eventos
 - pyproject.toml: dependências e metadados do projeto
 - Dockerfile: imagem da aplicação
-- docker-compose.yml: serviços app, celery e redis para execução com Podman
+- docker-compose.yml: serviços app, celery, redis, zookeeper, kafka e kafka-ui
 
 ## Observações
 - O banco SQLite é criado automaticamente no arquivo livros.db.
