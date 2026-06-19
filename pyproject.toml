@@ -14,7 +14,8 @@ dependencies = [
     "celery (>=5.6.3,<6.0.0)",
     "kafka-python (>=2.3.2,<3.0.0)",
     "pytest (>=9.0.3,<10.0.0)",
-    "pytest-cov (>=7.1.0,<8.0.0)"
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "python-dotenv (>=1.2.2,<2.0.0)"
 ]
 
 
@@ -22,5 +23,5 @@ dependencies = [
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.pytest.init_options]
+[tool.pytest.ini_options]
 pythonpath = ["."]
