@@ -28,13 +28,20 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
-import asyncio
+import logging.config
+import yaml
+from elasticsearch import Elasticsearch
+from datetime import datetime
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+ELASTICSEACH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+ELASTICHSEARCH_INDEX = os.getenv("ELASTICSEARCH_INDEX", "livros_logs")
+es_client = Elasticsearch(hosts=[ELASTICSEACH_URL])
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
@@ -46,6 +53,13 @@ TASK_HISTORY_LIMIT = 20
 TASK_RECORD_TTL_SECONDS = 24 * 60 * 60
 TASK_PAGE_SIZE = 10
 
+#es = Elasticsearch(hosts=["http://localhost:9200"])
+#with open("logging.yaml", "r") as f:
+#    config = yaml.safe_load()
+#    logging.config.dictConfig(config)
+#
+#logger = logging.getLogger(name)
+#logger.info("API inicializada com sucesso")
 app = FastAPI(
     title="API de Livros",
     description="API para gerenciar uma coleção de livros",
@@ -301,6 +315,21 @@ async def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_d
         redis_client.setex(cache_livros, CACHE_TTL_SECONDS, json.dumps(resposta))
     except RedisError:
         pass
+
+    log = {
+        "timestamp": datetime.utcnow().isoformat,
+        "endpoint": "/livros",
+        "usuario": credenciais.username,
+        "page": page,
+        "limit": limit,
+        "status": "success" if livros else "empty",
+        "total_livros": total_livros,
+    }
+    
+    try:
+        es_client.index(index=ELASTICHSEARCH_INDEX, body=log)
+    except Exception as e:
+        print(f"Erro ao enviar log para Elasticsearch: {e}")
 
     return resposta
 
