@@ -145,20 +145,43 @@ Use este fluxo toda vez que for subir o ambiente:
 1. Abra o terminal na raiz do projeto.
 2. Se houver containers antigos do projeto rodando, limpe antes de subir:
    podman-compose down
-3. Valide a configuração do Compose:
-   podman-compose config
-4. Suba os containers:
-   podman-compose up -d
-5. Verifique se os containers ficaram ativos:
+3. Suba com o script (Windows) para detectar compose e resolver conflito de porta automaticamente:
+   .\start-compose.ps1
+4. O script define APP_PORT (padrao 8000, fallback automatico para 8001/8002/9000 se ocupado), valida config e sobe os servicos.
+5. Verifique os containers ativos:
    podman ps
-6. Confira a API no navegador ou via terminal:
-   http://localhost:8000
-7. (Opcional) Acesse a interface do Kafka UI:
-   http://localhost:8080
+6. Confira a API na URL exibida pelo script (exemplo):
+   http://127.0.0.1:8000
+7. Acesse o Kibana:
+   http://localhost:5601
 
 Se quiser acompanhar os logs:
 
 podman-compose logs -f
+
+## Validar logs no ELK
+
+1. Suba os serviços:
+
+```bash
+podman-compose up -d
+```
+
+2. Gere tráfego na API (exemplo: acesse `/` ou `/livros`).
+
+3. Verifique quantidade de documentos indexados:
+
+```bash
+curl -s http://localhost:9200/livros-logs/_count
+```
+
+4. Busque documentos do índice:
+
+```bash
+curl -s "http://localhost:9200/livros-logs/_search?size=5&sort=@timestamp:desc"
+```
+
+5. Observação importante: `GET /livros-logs` retorna apenas metadados do índice (settings/mappings), não os eventos.
 
 Para derrubar o ambiente:
 
@@ -167,13 +190,18 @@ podman-compose down
 ## Executar localmente com Poetry
 1. Instale dependências:
    poetry install
-2. Em um terminal, suba a API:
-   poetry run fastapi dev main.py
-3. Em outro terminal, suba o worker do Celery:
+2. Em um terminal (Windows), suba a API com selecao automatica de porta:
+   .\start-fastapi-dev.ps1
+   (o script prioriza o Python do shell atual; se necessario, faz fallback para Poetry)
+   (tenta `python -m fastapi`; se indisponivel, faz fallback para `python -m uvicorn --reload`)
+3. Se preferir rodar manualmente, use host/porta explicitos:
+   poetry run python -m fastapi dev main.py --host 127.0.0.1 --port 8002
+   (use 8002 quando o Compose estiver ocupando a 8001)
+4. Em outro terminal, suba o worker do Celery:
    poetry run celery -A celery_app:celery_app worker -Q livros --loglevel=info
-4. Acesse:
+5. Acesse a URL exibida no terminal (exemplo):
    http://localhost:8000
-5. Documentação:
+6. Documentação na mesma porta (exemplo):
    http://localhost:8000/docs
 
 ## Executar com Podman Compose

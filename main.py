@@ -1,184 +1,284 @@
 # API de Livros
 
-#GET, POST, PUT, DELETE
-
-#Get - Ler dados
-#Post - Criar dados
-#Put - Atualizar dados
-#Delete - Deletar dados
-
+import asyncio
+import base64
+import json
+import logging
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi import Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from typing import Optional
 import secrets
 import os
-import math
-from datetime import datetime
+
 import redis
-import json
-from redis.exceptions import RedisError
-from fastapi import BackgroundTasks
-from tasks import somar, fatorial
-from celery_app import celery_app
-from celery.result import AsyncResult
-from kafka_producer import enviar_evento
+from tasks import fatorial, somar
+# from celery_app import celery_app
+# from celery.result import AsyncResult
+# from kafka_producer import enviar_evento
 
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 
-import logging.config
-import yaml
-from elasticsearch import Elasticsearch
-from datetime import datetime
+
+def configurar_logging_arquivo() -> None:
+    # Logs operacionais (uvicorn/app) ficam separados do log estruturado ingerido pelo Logstash.
+    log_file = os.getenv("LOG_FILE_PATH", "./logs/local-dev.log")
+    audit_log_file = os.getenv("AUDIT_LOG_FILE_PATH", "./logs/app.log")
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    audit_log_dir = os.path.dirname(audit_log_file)
+    if audit_log_dir:
+        os.makedirs(audit_log_dir, exist_ok=True)
+
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    )
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Evita adicionar handlers duplicados quando o processo reinicializa em modo dev.
+    ja_configurado = any(
+        isinstance(handler, logging.FileHandler)
+        and getattr(handler, "baseFilename", "") == file_handler.baseFilename
+        for handler in root_logger.handlers
+    )
+
+    if not ja_configurado:
+        root_logger.addHandler(file_handler)
+
+    audit_logger_obj = logging.getLogger("audit")
+    audit_logger_obj.setLevel(logging.INFO)
+    audit_logger_obj.propagate = False
+
+    audit_formatter = logging.Formatter("%(message)s")
+    audit_file_handler = logging.FileHandler(audit_log_file, encoding="utf-8")
+    audit_file_handler.setFormatter(audit_formatter)
+
+    audit_ja_configurado = any(
+        isinstance(handler, logging.FileHandler)
+        and getattr(handler, "baseFilename", "") == audit_file_handler.baseFilename
+        for handler in audit_logger_obj.handlers
+    )
+
+    if not audit_ja_configurado:
+        audit_logger_obj.addHandler(audit_file_handler)
+
+    # Loggers do uvicorn devem propagar para o root, sem handlers extras.
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(logger_name)
+        uvicorn_logger.setLevel(logging.INFO)
+        uvicorn_logger.propagate = True
+
+    # Reduz ruído de hot-reload no arquivo e no Elasticsearch.
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+
 
 load_dotenv()
+configurar_logging_arquivo()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
     raise RuntimeError(
-        "DATABASE_URL não configurada. Defina a variável de ambiente DATABASE_URL no .env ou no shell antes de iniciar a API."
+        "DATABASE_URL não configurada. Defina DATABASE_URL no .env ou no shell antes de iniciar a API."
     )
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-ELASTICSEACH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
-ELASTICHSEARCH_INDEX = os.getenv("ELASTICSEARCH_INDEX", "livros_logs")
-es_client = Elasticsearch(hosts=[ELASTICSEACH_URL])
-
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
 
-redis_client = redis.Redis(host=os.getenv("REDIS_HOST"), port=int(os.getenv("REDIS_PORT", 6379)), db=0, decode_responses=True)
-CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 30))
-TASK_HISTORY_KEY = "calcular:tarefas"
-TASK_HISTORY_LIMIT = 20
-TASK_RECORD_TTL_SECONDS = 24 * 60 * 60
-TASK_PAGE_SIZE = 10
 
-#es = Elasticsearch(hosts=["http://localhost:9200"])
-#with open("logging.yaml", "r") as f:
-#    config = yaml.safe_load()
-#    logging.config.dictConfig(config)
-#
-#logger = logging.getLogger(name)
-#logger.info("API inicializada com sucesso")
+class RedisFallbackClient:
+    def get(self, *_args, **_kwargs):
+        return None
+
+    def setex(self, *_args, **_kwargs):
+        return True
+
+    def lpush(self, *_args, **_kwargs):
+        return 0
+
+    def ltrim(self, *_args, **_kwargs):
+        return True
+
+
+try:
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
+except Exception:
+    redis_client = RedisFallbackClient()
+
 app = FastAPI(
     title="API de Livros",
-    description="API para gerenciar uma coleção de livros",
+    description="API para gerenciar catálogo de livros.",
     version="1.0.0",
     contact={
-        "name": "Lucas Limeira",
-        "email": "lucasdllimeira@gmail.com"
+        "name": "Atilio Hector",
+        "email": "thehacktour@gmail.com"
     }
 )
 
+logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("audit")
+
+
+def extrair_usuario_basic_auth(request: Request) -> str:
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.lower().startswith("basic "):
+        return "anonimo"
+
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        decoded = base64.b64decode(token).decode("utf-8")
+        username = decoded.split(":", 1)[0].strip()
+        return username if username else "anonimo"
+    except Exception:
+        return "anonimo"
+
+
+def parse_int_param(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.middleware("http")
+async def auditoria_requisicoes(request: Request, call_next):
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        status_code = response.status_code if response is not None else 500
+        page = parse_int_param(request.query_params.get("page"))
+        limit = parse_int_param(request.query_params.get("limit"))
+        total_livros = None
+
+        if request.url.path == "/livros" and response is not None and hasattr(response, "body"):
+            body_content = getattr(response, "body", b"")
+            if isinstance(body_content, bytes) and body_content:
+                try:
+                    payload = json.loads(body_content.decode("utf-8"))
+                    total_livros = payload.get("total_livros")
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    total_livros = None
+
+        evento = {
+            "endpoint": request.url.path,
+            "limit": limit,
+            "page": page,
+            "status": status_code,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "total_livros": total_livros,
+            "usuario": extrair_usuario_basic_auth(request),
+        }
+        audit_logger.info(json.dumps(evento, ensure_ascii=False))
+
 security = HTTPBasic()
+
+meus_livrozinhos = {}
 
 class LivroDB(Base):
     __tablename__ = "livros"
-
     id = Column(Integer, primary_key=True, index=True)
-    titulo = Column(String, index=True)
-    autor = Column(String, index=True)
-    lancamento = Column(Integer)
+    nome_livro = Column(String, index=True)
+    autor_livro = Column(String, index=True)
+    ano_livro = Column(Integer)
+
+    def __init__(self, **kwargs):
+        if "titulo" in kwargs and "nome_livro" not in kwargs:
+            kwargs["nome_livro"] = kwargs.pop("titulo")
+        if "autor" in kwargs and "autor_livro" not in kwargs:
+            kwargs["autor_livro"] = kwargs.pop("autor")
+        if "lancamento" in kwargs and "ano_livro" not in kwargs:
+            kwargs["ano_livro"] = kwargs.pop("lancamento")
+        super().__init__(**kwargs)
+
+    @property
+    def titulo(self):
+        return self.nome_livro
+
+    @titulo.setter
+    def titulo(self, value):
+        self.nome_livro = value
+
+    @property
+    def autor(self):
+        return self.autor_livro
+
+    @autor.setter
+    def autor(self, value):
+        self.autor_livro = value
+
+    @property
+    def lancamento(self):
+        return self.ano_livro
+
+    @lancamento.setter
+    def lancamento(self, value):
+        self.ano_livro = value
 
 class Livro(BaseModel):
-    titulo: str
-    autor: str
-    lancamento: int
+    nome_livro: str
+    autor_livro: str
+    ano_livro: int
+
+
+def migrar_schema_livros_compatibilidade():
+    inspector = inspect(engine)
+    if not inspector.has_table("livros"):
+        return
+
+    colunas_existentes = {col["name"] for col in inspector.get_columns("livros")}
+
+    with engine.begin() as conn:
+        if "nome_livro" not in colunas_existentes:
+            conn.execute(text("ALTER TABLE livros ADD COLUMN nome_livro TEXT"))
+            colunas_existentes.add("nome_livro")
+
+        if "autor_livro" not in colunas_existentes:
+            conn.execute(text("ALTER TABLE livros ADD COLUMN autor_livro TEXT"))
+            colunas_existentes.add("autor_livro")
+
+        if "ano_livro" not in colunas_existentes:
+            conn.execute(text("ALTER TABLE livros ADD COLUMN ano_livro INTEGER"))
+            colunas_existentes.add("ano_livro")
+
+        if "titulo" in colunas_existentes and "nome_livro" in colunas_existentes:
+            conn.execute(text("UPDATE livros SET nome_livro = titulo WHERE nome_livro IS NULL"))
+
+        if "autor" in colunas_existentes and "autor_livro" in colunas_existentes:
+            conn.execute(text("UPDATE livros SET autor_livro = autor WHERE autor_livro IS NULL"))
+
+        if "lancamento" in colunas_existentes and "ano_livro" in colunas_existentes:
+            conn.execute(text("UPDATE livros SET ano_livro = lancamento WHERE ano_livro IS NULL"))
+
 
 Base.metadata.create_all(bind=engine)
+migrar_schema_livros_compatibilidade()
 
-def salvar_livro_cache(livro: LivroDB):
-    try:
-        redis_client.setex(
-            f"livro:{livro.id}",
-            CACHE_TTL_SECONDS,
-            json.dumps(
-                {
-                    "id": livro.id,
-                    "titulo": livro.titulo,
-                    "autor": livro.autor,
-                    "lancamento": livro.lancamento,
-                }
-            ),
-        )
-        return True
-    except RedisError:
-        return False
+# def salvar_livro_redis(livro_id: int, livro: Livro):
+#     redis_client.set(f"livro:{livro_id}", json.dumps(livro.dict()))
 
-def deletar_livro_cache(id: int):
-    try:
-        redis_client.delete(f"livro:{id}")
-        return True
-    except RedisError:
-        return False
+# def deletar_livro_redis(livro_id: int):
+#     redis_client.delete(f"livro:{livro_id}")
 
-def registrar_tarefa(task_id: str, tipo: str, entrada: dict):
-    tarefa = {
-        "task_id": task_id,
-        "tipo": tipo,
-        "entrada": entrada,
-        "status": "Pendente",
-        "resultado": None,
-        "criada_em": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-    }
-
-    try:
-        redis_client.setex(
-            f"calcular:task:{task_id}",
-            TASK_RECORD_TTL_SECONDS,
-            json.dumps(tarefa),
-        )
-        redis_client.lpush(TASK_HISTORY_KEY, task_id)
-        redis_client.ltrim(TASK_HISTORY_KEY, 0, TASK_HISTORY_LIMIT - 1)
-    except RedisError:
-        pass
-
-    return tarefa
-
-
-def formatar_status_tarefa(task_id: str):
-    tarefa_salva = None
-    try:
-        tarefa_bruta = redis_client.get(f"calcular:task:{task_id}")
-        if tarefa_bruta:
-            tarefa_salva = json.loads(tarefa_bruta)
-    except RedisError:
-        pass
-
-    task_result = AsyncResult(task_id, app=celery_app)
-    status_map = {
-        "PENDING": "Pendente",
-        "STARTED": "Em execução",
-        "SUCCESS": "Concluída",
-        "FAILURE": "Falhou",
-    }
-    status = status_map.get(task_result.state, task_result.state)
-
-    resposta = tarefa_salva or {"task_id": task_id}
-    resposta.update(
-        {
-            "status": status,
-            "resultado": task_result.result if task_result.state == "SUCCESS" else (str(task_result.result) if task_result.state == "FAILURE" else None),
-        }
-    )
-    return resposta
-
-
-def total_tarefas_registradas() -> int:
-    try:
-        return redis_client.llen(TASK_HISTORY_KEY)
-    except RedisError:
-        return 0
-
-def get_db():
+def sessao_db():
     db = SessionLocal()
     try:
         yield db
@@ -186,230 +286,178 @@ def get_db():
         db.close()
 
 
-def obter_credenciais_configuradas() -> tuple[str, str]:
-    usuario = os.getenv("MEU_USUARIO")
-    senha = os.getenv("MINHA_SENHA")
+def get_db():
+    yield from sessao_db()
 
-    if usuario is None or senha is None:
+def autenticar_meu_usuario(credentials: HTTPBasicCredentials = Depends(security)):
+    meu_usuario = os.getenv("MEU_USUARIO")
+    minha_senha = os.getenv("MINHA_SENHA")
+
+    if meu_usuario is None or minha_senha is None:
         raise HTTPException(
             status_code=500,
             detail="Credenciais de autenticação não configuradas",
         )
 
-    return usuario, senha
+    is_username_correct = secrets.compare_digest(credentials.username, meu_usuario)
+    is_password_correct = secrets.compare_digest(credentials.password, minha_senha)
 
-def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
-    usuario_configurado, senha_configurada = obter_credenciais_configuradas()
-    correct_username = secrets.compare_digest(credentials.username, usuario_configurado)
-    correct_password = secrets.compare_digest(credentials.password, senha_configurada)
-    if not (correct_username and correct_password):
-        raise HTTPException(status_code=401, detail="Usuário ou senha incorretos", headers={"WWW-Authenticate": "Basic"})
+    if not (is_username_correct and is_password_correct):
+        raise HTTPException(
+            status_code=401,
+            detail="Usuário ou senha incorretos",
+            headers={"WWW-Authenticate": "Basic"}
+        )
+
     return credentials
 
 @app.get("/")
-async def ler_raiz():
+def hello_world():
+    logger.info("Endpoint raiz chamado")
     return {"message": "Bem-vindo à API de Livros!"}
 
 @app.post("/calcular/soma")
-async def calcular_soma(a: int, b: int, background_tasks: BackgroundTasks):
-    task = somar.delay(a, b)
-    registrar_tarefa(task.id, "soma", {"a": a, "b": b})
+def calcular_soma(a: int, b: int):
+    tarefa = somar.delay(a, b)
+    payload = {"a": a, "b": b}
+    redis_client.setex(f"tarefa:{tarefa.id}", 3600, json.dumps(payload))
+    redis_client.lpush("tarefas_ids", tarefa.id)
+    redis_client.ltrim("tarefas_ids", 0, 49)
     return {
-        "task_id": task.id,
+        "task_id": tarefa.id,
         "tipo": "soma",
-        "entrada": {"a": a, "b": b},
+        "entrada": payload,
         "status": "Pendente",
         "message": "Tarefa de soma iniciada. Use a lista de tarefas para acompanhar o andamento.",
     }
 
+
 @app.post("/calcular/fatorial")
-async def calcular_fatorial(n: int, background_tasks: BackgroundTasks):
-    task = fatorial.delay(n)
-    registrar_tarefa(task.id, "fatorial", {"n": n})
+def calcular_fatorial(n: int):
+    tarefa = fatorial.delay(n)
+    payload = {"n": n}
+    redis_client.setex(f"tarefa:{tarefa.id}", 3600, json.dumps(payload))
+    redis_client.lpush("tarefas_ids", tarefa.id)
+    redis_client.ltrim("tarefas_ids", 0, 49)
     return {
-        "task_id": task.id,
+        "task_id": tarefa.id,
         "tipo": "fatorial",
-        "entrada": {"n": n},
+        "entrada": payload,
         "status": "Pendente",
         "message": "Tarefa de fatorial iniciada. Use a lista de tarefas para acompanhar o andamento.",
     }
 
-@app.get("/calcular/tarefas")
-async def listar_tarefas(page: int = 1):
-    if page < 1:
-        raise HTTPException(status_code=400, detail="Page deve ser maior que zero.")
+# @app.get("/tarefas/recentes")
+# def listar_tarefas_recentes():
+#     ids = redis_client.lrange("tarefas_ids", 0, -1)
+#     tarefas = []
+#     for task_id in ids:
+#         resultado = AsyncResult(task_id, app=celery_app)
+#         tarefas.append({
+#             "task_id": task_id,
+#             "status": resultado.status,
+#             "resultado": resultado.result if resultado.successful() else None
+#         })
+#     return {
+#         "tarefas": tarefas
+#     }
 
-    try:
-        total_tarefas = total_tarefas_registradas()
-        offset = (page - 1) * TASK_PAGE_SIZE
-        task_ids = redis_client.lrange(TASK_HISTORY_KEY, offset, offset + TASK_PAGE_SIZE - 1)
-    except RedisError:
-        total_tarefas = 0
-        task_ids = []
-
-    tarefas = [formatar_status_tarefa(task_id) for task_id in task_ids]
-    return {
-        "page": page,
-        "limit": TASK_PAGE_SIZE,
-        "total_tarefas": total_tarefas,
-        "total_paginas": math.ceil(total_tarefas / TASK_PAGE_SIZE) if total_tarefas else 0,
-        "tarefas": tarefas,
-    }
-
-@app.get("/calcular/tarefas/{task_id}")
-async def obter_tarefa(task_id: str):
-    tarefa = formatar_status_tarefa(task_id)
-    return {
-        "task_id": tarefa["task_id"],
-        "tipo": tarefa.get("tipo"),
-        "entrada": tarefa.get("entrada"),
-        "status": tarefa["status"],
-        "result": tarefa.get("resultado"),
-        "criada_em": tarefa.get("criada_em"),
-    }
-
-@app.get("/debug/redis")
-async def debug_redis():
-    try:
-        itens_cache = []
-        for pattern in ("livro:*", "livros:*"):
-            keys = redis_client.keys(pattern)
-            for key in keys:
-                valor = redis_client.get(key)
-                if not valor:
-                    continue
-
-                ttl = redis_client.ttl(key)
-                itens_cache.append(
-                    {
-                        "chave": key,
-                        "ttl_segundos_restantes": ttl if ttl >= 0 else None,
-                        "valor": json.loads(valor),
-                    }
-                )
-
-        return {
-            "redis_status": "ok",
-            "ttl_padrao_segundos": CACHE_TTL_SECONDS,
-            "itens_cache": itens_cache,
-        }
-    except RedisError:
-        return {"redis_status": "indisponivel", "itens_cache": []}
+# @app.get("/debug/redis")
+# def ver_livros_redis():
+#     chaves = redis_client.keys("livros:*")
+#     livros = []
+#     for chave in chaves:
+#         valor = redis_client.get(chave)
+#         ttl = redis_client.ttl(chave)
+#         livros.append({"chave": chave, "valor": json.loads(valor), "ttl": ttl})
+#     return livros
 
 @app.get("/livros")
-async def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
+def get_livros(
+    page: int = 1,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)
+):
+    logger.info("Listando livros", extra={"page": page, "limit": limit})
     if page < 1 or limit < 1:
-        raise HTTPException(status_code=400, detail="Page ou limit estão com valores inválidos.")
+        raise HTTPException(status_code=400, detail="Page ou limit estão com valores inválidos!!!")
 
-    cache_livros = f"livros:page={page}&limit={limit}"
-    try:
-        cached = redis_client.get(cache_livros)
-        if cached:
-            return json.loads(cached)
-    except RedisError:
-        pass
-    
+    # cache_key = f"livros:page={page}&limit={limit}"
+    # cached = redis_client.get(cache_key) 
+    # if cached:
+    #     return json.loads(cached)
+
     livros = db.query(LivroDB).offset((page - 1) * limit).limit(limit).all()
+
+    if not livros:
+        return {"total_livros": 0, "livros": []}
+    
     total_livros = db.query(LivroDB).count()
 
     resposta = {
-        "page": page,
-        "limit": limit,
         "total_livros": total_livros,
-        "livros": [{"id": livro.id, "titulo": livro.titulo, "autor": livro.autor, "lancamento": livro.lancamento} for livro in livros]
+        "livros": [
+            {
+                "id": livro.id,
+                "titulo": livro.nome_livro,
+                "autor": livro.autor_livro,
+                "lancamento": livro.ano_livro
+            } for livro in livros
+        ]
     }
 
-    try:
-        redis_client.setex(cache_livros, CACHE_TTL_SECONDS, json.dumps(resposta))
-    except RedisError:
-        pass
-
-    log = {
-        "timestamp": datetime.utcnow().isoformat,
-        "endpoint": "/livros",
-        "usuario": credenciais.username,
-        "page": page,
-        "limit": limit,
-        "status": "success" if livros else "empty",
-        "total_livros": total_livros,
-    }
-    
-    try:
-        es_client.index(index=ELASTICHSEARCH_INDEX, body=log)
-    except Exception as e:
-        print(f"Erro ao enviar log para Elasticsearch: {e}")
+    # redis_client.setex(cache_key, 30, json.dumps(resposta))
 
     return resposta
 
-@app.post("/adicionar_livros")
-async def criar_livro(livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    if db.query(LivroDB).filter(LivroDB.titulo == livro.titulo, LivroDB.autor == livro.autor).first():
-        raise HTTPException(status_code=400, detail="Livro já existe")
-    else:
-        novo_livro = LivroDB(titulo=livro.titulo, autor=livro.autor, lancamento=livro.lancamento)
-        db.add(novo_livro)
-        db.commit()
-        db.refresh(novo_livro)
-        cache_salvo = salvar_livro_cache(novo_livro)
+@app.post("/adiciona")
+async def post_livros(livro: Livro, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
+    logger.info("Criando livro", extra={"nome_livro": livro.nome_livro, "autor_livro": livro.autor_livro})
+    db_livro = db.query(LivroDB).filter(LivroDB.nome_livro == livro.nome_livro, LivroDB.autor_livro == livro.autor_livro).first()
+    if db_livro:
+        raise HTTPException(status_code=400, detail="Esse livro já existe dentro do banco de dados!!!")
 
-        enviar_evento("livros_eventos", {
-            "acao": "criar",
-            "livro": livro.model_dump(),
-        })
-
-    response = {
-        "detail": "Livro adicionado com sucesso",
-        "livro": {
-            "id": novo_livro.id,
-            "titulo": novo_livro.titulo,
-            "autor": novo_livro.autor,
-            "lancamento": novo_livro.lancamento,
-        },
-    }
-
-    if not cache_salvo:
-        response["cache_warning"] = "Livro salvo no banco, mas o Redis esta indisponivel"
-
-    return response
-
-@app.put("/atualizar_livros/{id}")
-async def atualizar_livro(id: int, livro: Livro, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    livro_db = db.query(LivroDB).filter(LivroDB.id == id).first()
-    if not livro_db:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
-    livro_db.titulo = livro.titulo
-    livro_db.autor = livro.autor
-    livro_db.lancamento = livro.lancamento
+    novo_livro = LivroDB(nome_livro=livro.nome_livro, autor_livro=livro.autor_livro, ano_livro=livro.ano_livro)
+    db.add(novo_livro)
     db.commit()
-    db.refresh(livro_db)
-    cache_salvo = salvar_livro_cache(livro_db)
+    db.refresh(novo_livro)
 
-    response = {
-        "detail": "Livro atualizado com sucesso",
-        "livro": {
-            "id": livro_db.id,
-            "titulo": livro_db.titulo,
-            "autor": livro_db.autor,
-            "lancamento": livro_db.lancamento,
-        },
-    }
+    # salvar_livro_redis(novo_livro.id, livro)
 
-    if not cache_salvo:
-        response["cache_warning"] = "Livro atualizado no banco, mas o Redis esta indisponivel"
+    # enviar_evento("livros_eventos", {
+    #     "acao": "criar",
+    #     "livro": livro.dict()
+    # })
 
-    return response
+    return {"message": "O livro foi criado com sucesso!"}
 
-@app.delete("/deletar_livros/{id}")
-async def deletar_livro(id: int, db: Session = Depends(get_db), credenciais: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    livro_db = db.query(LivroDB).filter(LivroDB.id == id).first()
-    if not livro_db:
-        raise HTTPException(status_code=404, detail="Livro não encontrado")
-    db.delete(livro_db)
+@app.put("/atualiza/{id_livro}")
+async def put_livros(id_livro: int, livro: Livro, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
+    logger.info("Atualizando livro", extra={"id_livro": id_livro})
+    db_livro = db.query(LivroDB).filter(LivroDB.id == id_livro).first()
+    if not db_livro:
+        raise HTTPException(status_code=404, detail="Este livro não foi encontrado no seu banco de dados!")
+    
+    db_livro.nome_livro = livro.nome_livro
+    db_livro.autor_livro = livro.autor_livro
+    db_livro.ano_livro = livro.ano_livro
+
     db.commit()
-    cache_deletado = deletar_livro_cache(id)
-    if not cache_deletado:
-        return {
-            "detail": "Livro deletado com sucesso",
-            "cache_warning": "Livro removido do banco, mas o Redis esta indisponivel",
-        }
-    return {"detail": "Livro deletado com sucesso"}
+    db.refresh(db_livro)
+
+    return {"message": "O livro foi atualizado com sucesso!!!"}
+
+@app.delete("/deletar/{id_livro}")
+async def delete_livro(id_livro: int, db: Session = Depends(get_db), credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
+    logger.info("Deletando livro", extra={"id_livro": id_livro})
+    db_livro = db.query(LivroDB).filter(LivroDB.id == id_livro).first()
+    if not db_livro:
+        raise HTTPException(status_code=404, detail="Este livro não foi encontrado no seu banco de dados!!!")
+
+    db.delete(db_livro)
+    db.commit()
+
+    # deletar_livro_redis(id_livro)
+
+    return {"message": "Seu livro foi deletado com sucesso!"}

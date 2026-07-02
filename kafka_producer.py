@@ -2,17 +2,21 @@ from kafka import KafkaProducer
 import json
 import os
 
-KAFKA_SERVER = os.getenv('KAFKA_SERVER', 'kafka:9092')
+KAFKA_SERVER = os.getenv("KAFKA_SERVER", "kafka:9092")
 
 producer = None
 
 def get_producer():
     global producer
     if producer is None:
-        producer = KafkaProducer(bootstrap_servers=KAFKA_SERVER, value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+        producer = KafkaProducer(
+            bootstrap_servers=KAFKA_SERVER,
+            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
+
     return producer
 
 def enviar_evento(topico: str, evento: dict):
-    producer = get_producer()
-    producer.send(topico, evento)
-    producer.flush()
+    prod = get_producer()
+    prod.send(topico, evento)
+    prod.flush()

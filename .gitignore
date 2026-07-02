@@ -1,47 +1,185 @@
-# Python bytecode and caches
+.env
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual environments
-.venv/
+# Cython debug symbols
+*.pyd
+*.so
+*.dll
+
+# Distribution / packaging
+.Python
+*.egg-info/
+*.egg
+*.whl
+*.deb
+*.tar.gz
+*.zip
+build/
+dist/
+wheels/
+*.spec
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Poetry
+poetry.lock
+.poetry/
+.cache/
 venv/
-env/
+.virtualenvs/
 
-# Tool caches
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Pytest
+.cache/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
 htmlcov/
+.coverage
+*.cover
+.coverage.*
 
-# Local environment files
-.env
-.env.*
-!.env.example
+# Test reports
+nosetests.xml
+coverage.xml
+*.coveragerc
 
-# Local databases and runtime files
-*.db
-*.sqlite
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# MyPy
+.mypy_cache/
+dmypy.json
+dmypy.db
+
+# FastAPI Static Files
+static/
+staticfiles/
+media/
+static_root/
+media_root/
+
+# Database files
 *.sqlite3
+*.db
+*.sql
 
-# Logs
+# Redis
+dump.rdb
+*.aof
+*.rdb
+
+# Unit test / coverage reports
+.tox/
+.cache/
+.nox/
+*.coverage
+.coverage.*
+.coverage_html/
+.coverage_xml/
 *.log
+logs/
+*.log.*
 
-# IDE/editor
-.vscode/
+# IDEs
 .idea/
+.vscode/
+.vim/
+*.sublime-workspace
+*.sublime-project
+*.code-workspace
+
+# Pycharm
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Docker
+Dockerfile
+docker-compose.yml
+*.env
+.envrc
+.dockerignore
+docker-compose.override.yml
+
+# Anaconda
+.conda/
+*.condarc
+*.conda
+*.h5
+*.hdf5
+*.lock
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Black
+.pyre/
+
+# Pylint
+.pylint.d/
+
+# Pyre
+.pyre/
+
+# Celery
+*.pid
+
+# Pyre (Python static type checker)
+.pyre/
+
+# VSCode settings
+.vscode/
+
+# Logs and debug files
+*.log
+*.log.*
+logs/
+debug.log
+error.log
+
+# Data files
+*.csv
+*.json
+*.yaml
+*.yml
+*.xml
+*.xls
+*.xlsx
+*.parquet
+*.feather
+*.hdf5
+*.db
+
+# Other
+*.bak
 *.swp
 *.swo
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Jupyter
-.ipynb_checkpoints/
+*.tmp
+*.temp
