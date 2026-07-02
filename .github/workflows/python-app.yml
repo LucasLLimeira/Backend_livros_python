@@ -29,8 +29,5 @@ jobs:
       - name: 🧪 Rodar testes (placeholder)
         run: poetry run pytest
 
-      - name: Checkout do Código
-        run: actions/checkout@v3
-
       - name: Build da imagem Docker
         run: docker build -t my-fastapi-app .
