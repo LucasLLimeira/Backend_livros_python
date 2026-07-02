@@ -17,7 +17,7 @@ spec:
           image: livros-api:latest
           imagePullPolicy: Never
           ports:
-            - containerPort: 8080
+            - containerPort: 8000
           env:
             - name: DATABASE_URL
               value: "sqlite:///./livros.db"

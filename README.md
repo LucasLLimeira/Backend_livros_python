@@ -37,6 +37,107 @@ KAFKA_SERVER=kafka:9092
 
 Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
 
+## Deploy local com Minikube (script.sh)
+
+### Dependências obrigatórias
+- bash (Git Bash ou WSL no Windows)
+- Docker Desktop (com engine Linux)
+- minikube
+- kubectl
+
+### Essencial para testes futuros (Windows + Hyper-V)
+1. Se o driver configurado for Hyper-V, execute o terminal como Administrador antes de rodar `minikube start`.
+2. Garanta que o contexto ativo seja o do Minikube:
+   `kubectl config use-context minikube`
+3. Este projeto usa `imagePullPolicy: Never` no deployment, então a imagem precisa existir dentro do Minikube em cada ambiente novo:
+   `minikube image build -t livros-api:latest .`
+4. Valide status antes do deploy:
+   `minikube status` e `kubectl get nodes`
+5. Se o deploy travar em pods não prontos, diagnostique com:
+   `kubectl describe pod -l app=livros-api` e `kubectl logs -l app=livros-api --tail=100`
+
+### Instalação de dependências ausentes (Windows)
+
+PowerShell (winget):
+
+```powershell
+winget install -e --id Docker.DockerDesktop
+winget install -e --id Kubernetes.minikube
+winget install -e --id Kubernetes.kubectl
+```
+
+PowerShell (Chocolatey):
+
+```powershell
+choco install docker-desktop minikube kubernetes-cli -y
+```
+
+Se for usar Git Bash, execute o script dentro do Git Bash na raiz do projeto.
+
+### Instalação rápida (Linux Ubuntu/Debian)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y docker.io kubectl curl
+curl -LO https://github.com/kubernetes/minikube/releases/download/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+```
+
+### Comandos para iniciar
+
+Na raiz do projeto:
+
+PowerShell (Windows):
+
+```powershell
+bash ./script.sh
+```
+
+Git Bash:
+
+```bash
+./script.sh
+```
+
+O script valida dependências, inicia o minikube (se necessário), aplica [deployment.yaml](deployment.yaml) e [service.yaml](service.yaml), cria port-forward e abre http://localhost:8000.
+
+Para garantir que os pods iniciem em ambiente novo, rode antes do script:
+
+```powershell
+minikube image build -t livros-api:latest .
+```
+
+### Comandos para parar
+
+1. Parar o port-forward em execução:
+- pressione Ctrl+C no terminal onde o script está rodando.
+
+2. Remover os recursos aplicados:
+
+```bash
+kubectl delete -f service.yaml
+kubectl delete -f deployment.yaml
+```
+
+3. Parar o Minikube:
+
+```bash
+minikube stop
+```
+
+4. (Opcional) Limpar cluster local para teste do zero:
+
+```bash
+minikube delete
+```
+
+### Troubleshooting rápido
+- Erro de kubectl context: `kubectl config use-context minikube`
+- Porta 8000 ocupada: finalize o processo da porta e rode o script novamente
+- Minikube não sobe: valide se Docker Desktop está em execução
+- Hyper-V sem permissão: abra o PowerShell como Administrador
+- Pods em timeout no `kubectl wait`: rode `minikube image build -t livros-api:latest .` e faça `kubectl rollout restart deployment/livros-api`
+
 ## Passo a passo para iniciar o projeto
 Use este fluxo toda vez que for subir o ambiente:
 
