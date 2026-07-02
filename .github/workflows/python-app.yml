@@ -27,4 +27,4 @@ jobs:
         run: poetry install --no-interaction --no-root
 
       - name: 🧪 Rodar testes (placeholder)
-        run: poetry run pytest
+        run: echo "Nenhum teste configurado ainda."
