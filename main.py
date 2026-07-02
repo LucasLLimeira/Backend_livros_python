@@ -288,10 +288,6 @@ async def ler_livros(page: int = 1, limit: int = 10, db: Session = Depends(get_d
         pass
     
     livros = db.query(LivroDB).offset((page - 1) * limit).limit(limit).all()
-
-    if not livros:
-        raise HTTPException(status_code=404, detail="Nenhum livro encontrado")
-    
     total_livros = db.query(LivroDB).count()
 
     resposta = {
