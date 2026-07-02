@@ -29,3 +29,5 @@ def pytest_configure() -> None:
 
     # Ensure tests have a local database URL even when .env is missing.
     os.environ.setdefault("DATABASE_URL", "sqlite:///./livros.db")
+    os.environ.setdefault("MEU_USUARIO", "lucas")
+    os.environ.setdefault("MINHA_SENHA", "123456")

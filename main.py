@@ -56,9 +56,6 @@ app = FastAPI(
     }
 )
 
-MEU_USUARIO = os.getenv("MEU_USUARIO")
-MINHA_SENHA = os.getenv("MINHA_SENHA")
-
 security = HTTPBasic()
 
 class LivroDB(Base):
@@ -166,9 +163,23 @@ def get_db():
     finally:
         db.close()
 
+
+def obter_credenciais_configuradas() -> tuple[str, str]:
+    usuario = os.getenv("MEU_USUARIO")
+    senha = os.getenv("MINHA_SENHA")
+
+    if usuario is None or senha is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Credenciais de autenticação não configuradas",
+        )
+
+    return usuario, senha
+
 def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, MEU_USUARIO)
-    correct_password = secrets.compare_digest(credentials.password, MINHA_SENHA)
+    usuario_configurado, senha_configurada = obter_credenciais_configuradas()
+    correct_username = secrets.compare_digest(credentials.username, usuario_configurado)
+    correct_password = secrets.compare_digest(credentials.password, senha_configurada)
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Usuário ou senha incorretos", headers={"WWW-Authenticate": "Basic"})
     return credentials.username

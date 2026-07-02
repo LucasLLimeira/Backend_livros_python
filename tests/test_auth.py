@@ -1,12 +1,8 @@
 from fastapi.testclient import TestClient
 from main import app
-import os
 import pytest
 
 client = TestClient(app)
-
-os.environ["MEU_USUARIO"] = "lucas"
-os.environ["MINHA_SENHA"] = "123456"
 
 @pytest.fixture(autouse=True)
 def mock_redis(mocker):
