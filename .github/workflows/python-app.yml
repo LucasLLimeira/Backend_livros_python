@@ -27,4 +27,4 @@ jobs:
         run: poetry install --no-interaction --no-root
 
       - name: 🧪 Rodar testes (placeholder)
-        run: pytest
+        run: poetry run pytest
