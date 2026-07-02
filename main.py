@@ -10,6 +10,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
+from dotenv import load_dotenv
 from typing import Optional
 import secrets
 import os
@@ -33,7 +34,14 @@ import yaml
 from elasticsearch import Elasticsearch
 from datetime import datetime
 
+load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL não configurada. Defina a variável de ambiente DATABASE_URL no .env ou no shell antes de iniciar a API."
+    )
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -196,7 +204,7 @@ def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
     correct_password = secrets.compare_digest(credentials.password, senha_configurada)
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Usuário ou senha incorretos", headers={"WWW-Authenticate": "Basic"})
-    return credentials.username
+    return credentials
 
 @app.get("/")
 async def ler_raiz():

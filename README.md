@@ -36,6 +36,7 @@ CACHE_TTL_SECONDS=30
 KAFKA_SERVER=kafka:9092
 
 Para executar fora do Compose (Poetry local), ajuste REDIS_HOST para localhost.
+Sem `DATABASE_URL` a API não inicia (configuração estrita).
 
 ## Deploy local com Minikube (script.sh)
 
@@ -167,7 +168,7 @@ podman-compose down
 1. Instale dependências:
    poetry install
 2. Em um terminal, suba a API:
-   poetry run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+   poetry run fastapi dev main.py
 3. Em outro terminal, suba o worker do Celery:
    poetry run celery -A celery_app:celery_app worker -Q livros --loglevel=info
 4. Acesse:
